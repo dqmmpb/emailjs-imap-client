@@ -117,7 +117,8 @@
                 binaryType: 'arraybuffer',
                 useSecureTransport: this.secureMode,
                 ca: this.options.ca,
-                tlsWorkerPath: this.options.tlsWorkerPath
+                tlsWorkerPath: this.options.tlsWorkerPath,
+                ws: this.options.ws
             });
 
             // allows certificate handling for platform w/o native tls support
