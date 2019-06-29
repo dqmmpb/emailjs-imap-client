@@ -4,3 +4,4 @@ npm-debug.log
 test/lib
 
 .idea
+package-lock.json
