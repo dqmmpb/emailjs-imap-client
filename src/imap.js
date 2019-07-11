@@ -267,11 +267,14 @@ export default class Imap {
           if (this.isError(response)) {
             return reject(response)
           } else if (['NO', 'BAD'].indexOf(propOr('', 'command', response).toUpperCase().trim()) >= 0) {
-            var error = new Error(response.humanReadable || 'Error')
-            if (response.code) {
-              error.code = response.code
+            // Ignore QQ Email NO command message `Need to SELECT first!`
+            if (response.humanReadable !== 'Need to SELECT first!') {
+              var error = new Error(response.humanReadable || 'Error')
+              if (response.code) {
+                error.code = response.code
+              }
+              return reject(error)
             }
-            return reject(error)
           }
 
           resolve(response)
