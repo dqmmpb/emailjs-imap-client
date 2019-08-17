@@ -385,11 +385,14 @@ export default class Imap {
     this.logger.error(error)
 
     // always call onerror callback, no matter if close() succeeds or fails
-    this.close(error).then(() => {
-      this.onerror && this.onerror(error)
-    }, () => {
-      this.onerror && this.onerror(error)
-    })
+    // this.close(error).then(() => {
+    //   this.onerror && this.onerror(error)
+    // }, () => {
+    //   this.onerror && this.onerror(error)
+    // })
+
+    // don't close the connect
+    this.onerror && this.onerror(error)
   }
 
   /**
