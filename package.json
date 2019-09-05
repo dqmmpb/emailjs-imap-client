@@ -25,7 +25,6 @@
   "dependencies": {
     "emailjs-addressparser": "^2.0.2",
     "emailjs-base64": "^1.1.4",
-    "emailjs-imap-handler": "^3.0.2",
     "emailjs-mime-codec": "^2.0.8",
     "emailjs-utf7": "^4.0.1",
     "pako": "^1.0.10",
@@ -41,6 +40,7 @@
     "babel-plugin-inline-import": "^3.0.0",
     "chai": "^4.2.0",
     "emailjs-tcp-socket": "^2.0.2",
+    "emailjs-imap-handler": "^3.0.2",
     "hoodiecrow-imap": "^2.1.0",
     "mocha": "^6.1.4",
     "pre-commit": "^1.2.2",
