@@ -171,7 +171,9 @@ export default class Imap {
           this._currentCommand.callback(error)
         }
 
+        this._connectionReady = false
         this._clientQueue = []
+        this._tagCounter = 0
         this._currentCommand = false
 
         clearTimeout(this._idleTimer)
