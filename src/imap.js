@@ -36,7 +36,7 @@ const TIMEOUT_ENTER_IDLE = 1000
 /**
  * Lower Bound for socket timeout to wait since the last data was written to a socket
  */
-const TIMEOUT_SOCKET_LOWER_BOUND = 10000
+const TIMEOUT_SOCKET_LOWER_BOUND = 30000
 
 /**
  * Multiplier for socket timeout:
@@ -343,10 +343,10 @@ export default class Imap {
    */
   send (str) {
     const buffer = toTypedArray(str).buffer
-    const timeout = this.timeoutSocketLowerBound + Math.floor(buffer.byteLength * this.timeoutSocketMultiplier)
-
-    clearTimeout(this._socketTimeoutTimer) // clear pending timeouts
-    this._socketTimeoutTimer = setTimeout(() => this._onError(new Error('Socket timed out!')), timeout) // arm the next timeout
+    // const timeout = this.timeoutSocketLowerBound + Math.floor(buffer.byteLength * this.timeoutSocketMultiplier)
+    //
+    // clearTimeout(this._socketTimeoutTimer) // clear pending timeouts
+    // this._socketTimeoutTimer = setTimeout(() => this._onError(new Error('Socket timed out!')), timeout) // arm the next timeout
 
     if (this.compressed) {
       this._sendCompressed(buffer)
@@ -407,9 +407,10 @@ export default class Imap {
    * @param {Event} evt
    */
   _onData (evt) {
-    clearTimeout(this._socketTimeoutTimer) // reset the timeout on each data packet
-    const timeout = this.timeoutSocketLowerBound + Math.floor(4096 * this.timeoutSocketMultiplier) // max packet size is 4096 bytes
-    this._socketTimeoutTimer = setTimeout(() => this._onError(new Error('Socket timed out!')), timeout)
+    // const timeout = this.timeoutSocketLowerBound + Math.floor(4096 * this.timeoutSocketMultiplier) // max packet size is 4096 bytes
+    //
+    // clearTimeout(this._socketTimeoutTimer) // reset the timeout on each data packet
+    // this._socketTimeoutTimer = setTimeout(() => this._onError(new Error('Socket timed out!')), timeout)
 
     this._incomingBuffers.push(new Uint8Array(evt.data)) // append to the incoming buffer
     this._parseIncomingCommands(this._iterateIncomingBuffer()) // Consume the incoming buffer
