@@ -36,7 +36,7 @@ const TIMEOUT_ENTER_IDLE = 1000
 /**
  * Lower Bound for socket timeout to wait since the last data was written to a socket
  */
-const TIMEOUT_SOCKET_LOWER_BOUND = 30000
+const TIMEOUT_SOCKET_LOWER_BOUND = 10000
 
 /**
  * Multiplier for socket timeout:
@@ -388,14 +388,14 @@ export default class Imap {
     this.logger.error(error)
 
     // always call onerror callback, no matter if close() succeeds or fails
-    // this.close(error).then(() => {
-    //   this.onerror && this.onerror(error)
-    // }, () => {
-    //   this.onerror && this.onerror(error)
-    // })
+    this.close(error).then(() => {
+      this.onerror && this.onerror(error)
+    }, () => {
+      this.onerror && this.onerror(error)
+    })
 
     // don't close the connect
-    this.onerror && this.onerror(error)
+    // this.onerror && this.onerror(error)
   }
 
   /**
