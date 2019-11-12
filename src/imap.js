@@ -164,39 +164,42 @@ export default class Imap {
    * @returns {Promise} Resolves when the socket is closed
    */
   close (error) {
-    return new Promise((resolve) => {
-      var tearDown = () => {
-        // fulfill pending promises
-        this._clientQueue.forEach(cmd => cmd.callback(error))
-        if (this._currentCommand) {
-          this._currentCommand.callback(error)
-        }
+    return new Promise((resolve, reject) => {
+      const tearDown = () => {
 
-        this._connectionReady = false
-        this._clientQueue = []
-        this._tagCounter = 0
-        this._currentCommand = false
+        try {
+          // fulfill pending promises
+          this._clientQueue.forEach(cmd => cmd.callback(error))
+          if (this._currentCommand) {
+            this._currentCommand.callback(error)
+          }
 
-        clearTimeout(this._idleTimer)
-        this._idleTimer = null
+          this._connectionReady = false
+          this._clientQueue = []
+          this._tagCounter = 0
+          this._currentCommand = false
 
-        clearTimeout(this._socketTimeoutTimer)
-        this._socketTimeoutTimer = null
+          clearTimeout(this._idleTimer)
+          this._idleTimer = null
 
-        if (this.socket) {
-          // remove all listeners
-          this.socket.onopen = null
-          this.socket.onclose = null
-          this.socket.ondata = null
-          this.socket.onerror = null
-          try {
+          clearTimeout(this._socketTimeoutTimer)
+          this._socketTimeoutTimer = null
+
+          if (this.socket) {
+            // remove all listeners
+            this.socket.onopen = null
+            this.socket.onclose = null
+            this.socket.ondata = null
+            this.socket.onerror = null
             this.socket.oncert = null
-          } catch (E) { }
 
-          this.socket = null
+            this.socket = null
+          }
+
+          resolve()
+        } catch (err) {
+          reject(err)
         }
-
-        resolve()
       }
 
       this._disableCompression()
