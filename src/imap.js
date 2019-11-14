@@ -105,6 +105,9 @@ export default class Imap {
     this.onerror = null // Irrecoverable error occurred. Connection to the server will be closed automatically.
     this.onready = null // The connection to the server has been established and greeting is received
     this.onidle = null // There are no more commands to process
+
+    this._onData = this._onData.bind(this)
+    this._onError = this._onError.bind(this)
   }
 
   // PUBLIC METHODS
@@ -121,39 +124,44 @@ export default class Imap {
    */
   connect (Socket = TCPSocket) {
     return new Promise((resolve, reject) => {
-      this.socket = Socket.open(this.host, this.port, {
-        binaryType: 'arraybuffer',
-        useSecureTransport: this.secureMode,
-        ca: this.options.ca,
-        ws: this.options.ws,
-        servername: this.options.servername
-      })
-
-      // allows certificate handling for platform w/o native tls support
-      // oncert is non standard so setting it might throw if the socket object is immutable
       try {
-        this.socket.oncert = (cert) => { this.oncert && this.oncert(cert) }
-      } catch (E) { }
-
-      // Connection closing unexpected is an error
-      this.socket.onclose = () => this._onError(new Error('Socket closed unexpectedly!'))
-      this.socket.ondata = (evt) => {
+        this.socket = Socket.open(this.host, this.port, {
+          binaryType: 'arraybuffer',
+          useSecureTransport: this.secureMode,
+          ca: this.options.ca,
+          ws: this.options.ws,
+          servername: this.options.servername
+        })
+        // allows certificate handling for platform w/o native tls support
+        // oncert is non standard so setting it might throw if the socket object is immutable
         try {
-          this._onData(evt)
-        } catch (err) {
-          this._onError(err)
+          this.socket.oncert = (cert) => { this.oncert && this.oncert(cert) }
+        } catch (e) {
         }
-      }
 
-      // if an error happens during create time, reject the promise
-      this.socket.onerror = (e) => {
-        reject(new Error('Could not open socket: ' + e.data.message))
-      }
+        // Connection closing unexpected is an error
+        this.socket.onclose = () => this._onError(new Error('Socket closed unexpectedly!' + this.host))
 
-      this.socket.onopen = () => {
-        // use proper "irrecoverable error, tear down everything"-handler only after socket is open
-        this.socket.onerror = (e) => this._onError(e)
-        resolve()
+        this.socket.ondata = (evt) => {
+          try {
+            this._onData(evt)
+          } catch (err) {
+            this._onError(err)
+          }
+        }
+
+        // if an error happens during create time, reject the promise
+        this.socket.onerror = (e) => {
+          reject(new Error('Could not open socket: ' + e.data.message))
+        }
+
+        this.socket.onopen = () => {
+          // use proper "irrecoverable error, tear down everything"-handler only after socket is open
+          this.socket.onerror = (e) => this._onError(e)
+          resolve()
+        }
+      } catch (e) {
+        reject(e)
       }
     })
   }
@@ -166,7 +174,6 @@ export default class Imap {
   close (error) {
     return new Promise((resolve, reject) => {
       const tearDown = () => {
-
         try {
           // fulfill pending promises
           this._clientQueue.forEach(cmd => cmd.callback(error))
@@ -195,7 +202,6 @@ export default class Imap {
 
             this.socket = null
           }
-
           resolve()
         } catch (err) {
           reject(err)
@@ -393,7 +399,7 @@ export default class Imap {
     // always call onerror callback, no matter if close() succeeds or fails
     this.close(error).then(() => {
       this.onerror && this.onerror(error)
-    }, () => {
+    }, error => {
       this.onerror && this.onerror(error)
     })
 

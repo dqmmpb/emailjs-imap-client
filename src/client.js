@@ -52,6 +52,7 @@ export const DEFAULT_CLIENT_ID = {
  */
 export default class Client {
   constructor (host, port, options = {}) {
+    this._onError = this._onError.bind(this)
     this.timeoutConnection = TIMEOUT_CONNECTION
     this.timeoutNoop = TIMEOUT_NOOP
     this.timeoutIdle = TIMEOUT_IDLE
@@ -80,7 +81,7 @@ export default class Client {
     this.client = new ImapClient(host, port, options) // IMAP client object
 
     // Event Handlers
-    this.client.onerror = this._onError.bind(this)
+    this.client.onerror = this._onError
     this.client.oncert = (cert) => (this.oncert && this.oncert(cert)) // allows certificate handling for platforms w/o native tls support
     this.client.onidle = () => this._onIdle() // start idling
 
@@ -134,7 +135,7 @@ export default class Client {
       await this.login(this._auth)
       await this.compressConnection()
       this.logger.debug('Connection established, ready to roll!')
-      this.client.onerror = this._onError.bind(this)
+      this.client.onerror = this._onError
     } catch (err) {
       this.logger.error('Could not connect to server', err)
       try {
@@ -151,19 +152,25 @@ export default class Client {
       let connectionTimeout = setTimeout(() => reject(new Error('Timeout connecting to server')), this.timeoutConnection)
       this.logger.debug('Connecting to', this.client.host, ':', this.client.port)
       this._changeState(STATE_CONNECTING)
-      this.client.connect().then(() => {
-        this.logger.debug('Socket opened, waiting for greeting from the server...')
+      try {
+        this.client.connect().then(() => {
+          this.logger.debug('Socket opened, waiting for greeting from the server...')
 
-        this.client.onready = () => {
-          clearTimeout(connectionTimeout)
-          resolve()
-        }
+          this.client.onready = () => {
+            clearTimeout(connectionTimeout)
+            resolve()
+          }
 
-        this.client.onerror = (err) => {
-          clearTimeout(connectionTimeout)
+          this.client.onerror = (err) => {
+            clearTimeout(connectionTimeout)
+            reject(err)
+          }
+        }).catch(err => {
           reject(err)
-        }
-      }).catch(reject)
+        })
+      } catch (err) {
+        reject(err)
+      }
     })
   }
 
@@ -215,12 +222,16 @@ export default class Client {
 
     const command = 'ID'
     const attributes = id ? [ flatten(Object.entries(id)) ] : [ null ]
-    const response = await this.exec({ command, attributes }, 'ID')
-    const list = flatten(pathOr([], ['payload', 'ID', '0', 'attributes', '0'], response).map(Object.values))
-    const keys = list.filter((_, i) => i % 2 === 0)
-    const values = list.filter((_, i) => i % 2 === 1)
-    this.serverId = fromPairs(zip(keys, values))
-    this.logger.debug('Server id updated!', this.serverId)
+    try {
+      const response = await this.exec({ command, attributes }, 'ID')
+      const list = flatten(pathOr([], ['payload', 'ID', '0', 'attributes', '0'], response).map(Object.values))
+      const keys = list.filter((_, i) => i % 2 === 0)
+      const values = list.filter((_, i) => i % 2 === 1)
+      this.serverId = fromPairs(zip(keys, values))
+      this.logger.debug('Server id updated!', this.serverId)
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   _shouldSelectMailbox (path, ctx) {
@@ -262,20 +273,24 @@ export default class Client {
     }
 
     this.logger.debug('Opening', path, '...')
-    const response = await this.exec(query, ['EXISTS', 'FLAGS', 'OK'], { ctx: options.ctx })
-    let mailboxInfo = parseSELECT(response)
+    try {
+      const response = await this.exec(query, ['EXISTS', 'FLAGS', 'OK'], { ctx: options.ctx })
+      let mailboxInfo = parseSELECT(response)
 
-    this._changeState(STATE_SELECTED)
+      this._changeState(STATE_SELECTED)
 
-    if (this._selectedMailbox !== path && this.onclosemailbox) {
-      await this.onclosemailbox(this._selectedMailbox)
+      if (this._selectedMailbox !== path && this.onclosemailbox) {
+        await this.onclosemailbox(this._selectedMailbox)
+      }
+      this._selectedMailbox = path
+      if (this.onselectmailbox) {
+        await this.onselectmailbox(path, mailboxInfo)
+      }
+
+      return mailboxInfo
+    } catch (err) {
+      this._onError(err)
     }
-    this._selectedMailbox = path
-    if (this.onselectmailbox) {
-      await this.onselectmailbox(path, mailboxInfo)
-    }
-
-    return mailboxInfo
   }
 
   /**
@@ -290,8 +305,12 @@ export default class Client {
     if (this._capability.indexOf('NAMESPACE') < 0) return false
 
     this.logger.debug('Listing namespaces...')
-    const response = await this.exec('NAMESPACE', 'NAMESPACE')
-    return parseNAMESPACE(response)
+    try {
+      const response = await this.exec('NAMESPACE', 'NAMESPACE')
+      return parseNAMESPACE(response)
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -308,34 +327,38 @@ export default class Client {
     const tree = { root: true, children: [] }
 
     this.logger.debug('Listing mailboxes...')
-    const listResponse = await this.exec({ command: 'LIST', attributes: ['', '*'] }, 'LIST')
-    const list = pathOr([], ['payload', 'LIST'], listResponse)
-    list.forEach(item => {
-      const attr = propOr([], 'attributes', item)
-      if (attr.length < 3) return
+    try {
+      const listResponse = await this.exec({ command: 'LIST', attributes: ['', '*'] }, 'LIST')
+      const list = pathOr([], ['payload', 'LIST'], listResponse)
+      list.forEach(item => {
+        const attr = propOr([], 'attributes', item)
+        if (attr.length < 3) return
 
-      const path = pathOr('', ['2', 'value'], attr)
-      const delim = pathOr('/', ['1', 'value'], attr)
-      const branch = this._ensurePath(tree, path, delim)
-      branch.flags = propOr([], '0', attr).map(({ value }) => value || '')
-      branch.listed = true
-      checkSpecialUse(branch)
-    })
+        const path = pathOr('', ['2', 'value'], attr)
+        const delim = pathOr('/', ['1', 'value'], attr)
+        const branch = this._ensurePath(tree, path, delim)
+        branch.flags = propOr([], '0', attr).map(({ value }) => value || '')
+        branch.listed = true
+        checkSpecialUse(branch)
+      })
 
-    const lsubResponse = await this.exec({ command: 'LSUB', attributes: ['', '*'] }, 'LSUB')
-    const lsub = pathOr([], ['payload', 'LSUB'], lsubResponse)
-    lsub.forEach((item) => {
-      const attr = propOr([], 'attributes', item)
-      if (attr.length < 3) return
+      const lsubResponse = await this.exec({ command: 'LSUB', attributes: ['', '*'] }, 'LSUB')
+      const lsub = pathOr([], ['payload', 'LSUB'], lsubResponse)
+      lsub.forEach((item) => {
+        const attr = propOr([], 'attributes', item)
+        if (attr.length < 3) return
 
-      const path = pathOr('', ['2', 'value'], attr)
-      const delim = pathOr('/', ['1', 'value'], attr)
-      const branch = this._ensurePath(tree, path, delim)
-      propOr([], '0', attr).map((flag = '') => { branch.flags = union(branch.flags, [flag]) })
-      branch.subscribed = true
-    })
+        const path = pathOr('', ['2', 'value'], attr)
+        const delim = pathOr('/', ['1', 'value'], attr)
+        const branch = this._ensurePath(tree, path, delim)
+        propOr([], '0', attr).map((flag = '') => { branch.flags = union(branch.flags, [flag]) })
+        branch.subscribed = true
+      })
 
-    return tree
+      return tree
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -377,7 +400,12 @@ export default class Client {
    */
   deleteMailbox (path) {
     this.logger.debug('Deleting mailbox', path, '...')
-    return this.exec({ command: 'DELETE', attributes: [imapEncode(path)] })
+    try {
+      const delResponse = this.exec({ command: 'DELETE', attributes: [imapEncode(path)] })
+      return delResponse
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -396,11 +424,15 @@ export default class Client {
    */
   async listMessages (path, sequence, items = [{ fast: true }], options = {}) {
     this.logger.debug('Fetching messages', sequence, 'from', path, '...')
-    const command = buildFETCHCommand(sequence, items, options)
-    const response = await this.exec(command, 'FETCH', {
-      precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
-    })
-    return parseFETCH(response)
+    try {
+      const command = buildFETCHCommand(sequence, items, options)
+      const response = await this.exec(command, 'FETCH', {
+        precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
+      })
+      return parseFETCH(response)
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -416,11 +448,15 @@ export default class Client {
    */
   async search (path, query, options = {}) {
     this.logger.debug('Searching in', path, '...')
-    const command = buildSEARCHCommand(query, options)
-    const response = await this.exec(command, 'SEARCH', {
-      precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
-    })
-    return parseSEARCH(response)
+    try {
+      const command = buildSEARCHCommand(query, options)
+      const response = await this.exec(command, 'SEARCH', {
+        precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
+      })
+      return parseSEARCH(response)
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -471,11 +507,15 @@ export default class Client {
    * @returns {Promise} Promise with the array of matching seq. or uid numbers
    */
   async store (path, sequence, action, flags, options = {}) {
-    const command = buildSTORECommand(sequence, action, flags, options)
-    const response = await this.exec(command, 'FETCH', {
-      precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
-    })
-    return parseFETCH(response)
+    try {
+      const command = buildSTORECommand(sequence, action, flags, options)
+      const response = await this.exec(command, 'FETCH', {
+        precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
+      })
+      return parseFETCH(response)
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -501,7 +541,12 @@ export default class Client {
     }
 
     this.logger.debug('Uploading message to', destination, '...')
-    return this.exec(command)
+    try {
+      const uploadResponse = this.exec(command)
+      return uploadResponse
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -530,9 +575,14 @@ export default class Client {
     const uidExpungeCommand = { command: 'UID EXPUNGE', attributes: [{ type: 'sequence', value: sequence }] }
     await this.setFlags(path, sequence, { add: '\\Deleted' }, options)
     const cmd = useUidPlus ? uidExpungeCommand : 'EXPUNGE'
-    return this.exec(cmd, null, {
-      precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
-    })
+    try {
+      const delResponse = this.exec(cmd, null, {
+        precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
+      })
+      return delResponse
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -551,16 +601,20 @@ export default class Client {
    */
   async copyMessages (path, sequence, destination, options = {}) {
     this.logger.debug('Copying messages', sequence, 'from', path, 'to', destination, '...')
-    const { humanReadable } = await this.exec({
-      command: options.byUid ? 'UID COPY' : 'COPY',
-      attributes: [
-        { type: 'sequence', value: sequence },
-        { type: 'atom', value: destination }
-      ]
-    }, null, {
-      precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
-    })
-    return humanReadable || 'COPY completed'
+    try {
+      const { humanReadable } = await this.exec({
+        command: options.byUid ? 'UID COPY' : 'COPY',
+        attributes: [
+          { type: 'sequence', value: sequence },
+          { type: 'atom', value: destination }
+        ]
+      }, null, {
+        precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
+      })
+      return humanReadable || 'COPY completed'
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -586,16 +640,21 @@ export default class Client {
       return this.deleteMessages(path, sequence, options)
     }
 
-    // If possible, use MOVE
-    return this.exec({
-      command: options.byUid ? 'UID MOVE' : 'MOVE',
-      attributes: [
-        { type: 'sequence', value: sequence },
-        { type: 'atom', value: destination }
-      ]
-    }, ['OK'], {
-      precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
-    })
+    try {
+      // If possible, use MOVE
+      const moveResponse = this.exec({
+        command: options.byUid ? 'UID MOVE' : 'MOVE',
+        attributes: [
+          { type: 'sequence', value: sequence },
+          { type: 'atom', value: destination }
+        ]
+      }, ['OK'], {
+        precheck: (ctx) => this._shouldSelectMailbox(path, ctx) ? this.selectMailbox(path, { ctx }) : Promise.resolve()
+      })
+      return moveResponse
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -610,15 +669,19 @@ export default class Client {
     }
 
     this.logger.debug('Enabling compression...')
-    await this.exec({
-      command: 'COMPRESS',
-      attributes: [{
-        type: 'ATOM',
-        value: 'DEFLATE'
-      }]
-    })
-    this.client.enableCompression()
-    this.logger.debug('Compression enabled, all data sent and received is deflated!')
+    try {
+      await this.exec({
+        command: 'COMPRESS',
+        attributes: [{
+          type: 'ATOM',
+          value: 'DEFLATE'
+        }]
+      })
+      this.client.enableCompression()
+      this.logger.debug('Compression enabled, all data sent and received is deflated!')
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -662,27 +725,31 @@ export default class Client {
     }
 
     this.logger.debug('Logging in...')
-    const response = await this.exec(command, 'capability', options)
-    /*
-     * update post-auth capabilites
-     * capability list shouldn't contain auth related stuff anymore
-     * but some new extensions might have popped up that do not
-     * make much sense in the non-auth state
-     */
-    if (response.capability && response.capability.length) {
-      // capabilites were listed with the OK [CAPABILITY ...] response
-      this._capability = response.capability
-    } else if (response.payload && response.payload.CAPABILITY && response.payload.CAPABILITY.length) {
-      // capabilites were listed with * CAPABILITY ... response
-      this._capability = response.payload.CAPABILITY.pop().attributes.map((capa = '') => capa.value.toUpperCase().trim())
-    } else {
-      // capabilities were not automatically listed, reload
-      await this.updateCapability(true)
-    }
+    try {
+      const response = await this.exec(command, 'capability', options)
+      /*
+       * update post-auth capabilites
+       * capability list shouldn't contain auth related stuff anymore
+       * but some new extensions might have popped up that do not
+       * make much sense in the non-auth state
+       */
+      if (response.capability && response.capability.length) {
+        // capabilites were listed with the OK [CAPABILITY ...] response
+        this._capability = response.capability
+      } else if (response.payload && response.payload.CAPABILITY && response.payload.CAPABILITY.length) {
+        // capabilites were listed with * CAPABILITY ... response
+        this._capability = response.payload.CAPABILITY.pop().attributes.map((capa = '') => capa.value.toUpperCase().trim())
+      } else {
+        // capabilities were not automatically listed, reload
+        await this.updateCapability(true)
+      }
 
-    this._changeState(STATE_AUTHENTICATED)
-    this._authenticated = true
-    this.logger.debug('Login successful, post-auth capabilites updated!', this._capability)
+      this._changeState(STATE_AUTHENTICATED)
+      this._authenticated = true
+      this.logger.debug('Login successful, post-auth capabilites updated!', this._capability)
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   /**
@@ -706,7 +773,7 @@ export default class Client {
    * IDLE details:
    *   https://tools.ietf.org/html/rfc2177
    */
-  enterIdle () {
+  async enterIdle () {
     if (this._enteredIdle) {
       return
     }
@@ -714,14 +781,22 @@ export default class Client {
     this.logger.debug('Entering idle with ' + this._enteredIdle)
 
     if (this._enteredIdle === 'NOOP') {
-      this._idleTimeout = setTimeout(() => {
+      this._idleTimeout = setTimeout(async () => {
         this.logger.debug('Sending NOOP')
-        this.exec('NOOP')
+        try {
+          await this.exec('NOOP')
+        } catch (err) {
+          this._onError(err)
+        }
       }, this.timeoutNoop)
     } else if (this._enteredIdle === 'IDLE') {
-      this.client.enqueueCommand({
-        command: 'IDLE'
-      })
+      try {
+        await this.client.enqueueCommand({
+          command: 'IDLE'
+        })
+      } catch (err) {
+        this._onError(err)
+      }
       this._idleTimeout = setTimeout(() => {
         this.client.send('DONE\r\n')
         this._enteredIdle = false
@@ -766,7 +841,11 @@ export default class Client {
     }
 
     this.logger.debug('Encrypting connection...')
-    await this.exec('STARTTLS')
+    try {
+      await this.exec('STARTTLS')
+    } catch (err) {
+      this._onError(err)
+    }
     this._capability = []
     this.client.upgrade()
     return this.updateCapability()
@@ -796,7 +875,12 @@ export default class Client {
     }
 
     this.logger.debug('Updating capability...')
-    return this.exec('CAPABILITY')
+    try {
+      const capResponse = this.exec('CAPABILITY')
+      return capResponse
+    } catch (err) {
+      this._onError(err)
+    }
   }
 
   hasCapability (capa = '') {
