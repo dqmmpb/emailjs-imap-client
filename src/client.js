@@ -140,7 +140,9 @@ export default class Client {
       this.logger.error('Could not connect to server', err)
       try {
         await this.close(err) // we don't really care whether this works or not
+        this._onError(err)
       } catch (cErr) {
+        this._onError(cErr)
         throw cErr
       }
       throw err
