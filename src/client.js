@@ -798,7 +798,11 @@ export default class Client {
         this._onError(err)
       }
       this._idleTimeout = setTimeout(() => {
-        this.client.send('DONE\r\n')
+        try {
+          this.client.send('DONE\r\n')
+        } catch (err) {
+          this._onError(err)
+        }
         this._enteredIdle = false
         this.logger.debug('Idle terminated')
       }, this.timeoutIdle)

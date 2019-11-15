@@ -360,6 +360,9 @@ export default class Imap {
     if (this.compressed) {
       this._sendCompressed(buffer)
     } else {
+      if (!this.socket) {
+        throw new Error('Socket timed out!')
+      }
       this.socket.send(buffer)
     }
   }
