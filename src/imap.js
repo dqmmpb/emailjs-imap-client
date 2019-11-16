@@ -31,12 +31,12 @@ const BUFFER_STATE_DEFAULT = 'default'
 /**
  * How much time to wait since the last response until the connection is considered idling
  */
-const TIMEOUT_ENTER_IDLE = 1000
+const TIMEOUT_ENTER_IDLE = 20000
 
 /**
  * Lower Bound for socket timeout to wait since the last data was written to a socket
  */
-const TIMEOUT_SOCKET_LOWER_BOUND = 10000
+const TIMEOUT_SOCKET_LOWER_BOUND = 30000
 
 /**
  * Multiplier for socket timeout:
