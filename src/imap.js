@@ -392,10 +392,10 @@ export default class Imap {
    */
   _onError (evt) {
     var error
-    if (this.isError(evt)) {
-      error = evt
-    } else if (evt && this.isError(evt.data)) {
+    if (evt && evt.data && this.isError(evt.data)) {
       error = evt.data
+    } else if (this.isError(evt)) {
+      error = evt
     } else {
       error = new Error((evt && evt.data && evt.data.message) || evt.data || evt || 'Error')
     }
