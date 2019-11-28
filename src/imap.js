@@ -31,12 +31,12 @@ const BUFFER_STATE_DEFAULT = 'default'
 /**
  * How much time to wait since the last response until the connection is considered idling
  */
-const TIMEOUT_ENTER_IDLE = 20000
+const TIMEOUT_ENTER_IDLE = 1000
 
 /**
  * Lower Bound for socket timeout to wait since the last data was written to a socket
  */
-const TIMEOUT_SOCKET_LOWER_BOUND = 30000
+const TIMEOUT_SOCKET_LOWER_BOUND = 10000
 
 /**
  * Multiplier for socket timeout:
@@ -140,7 +140,10 @@ export default class Imap {
         }
 
         // Connection closing unexpected is an error
-        this.socket.onclose = () => this._onError(new Error('Socket closed unexpectedly!' + this.host))
+        this.socket.onclose = (e) => {
+          console.log('close ', e)
+          this._onError(new Error('Socket closed unexpectedly!' + this.host))
+        }
 
         this.socket.ondata = (evt) => {
           try {
@@ -400,12 +403,12 @@ export default class Imap {
     this.logger.error(error)
 
     // always call onerror callback, no matter if close() succeeds or fails
-    this.close(error).then(() => {
-      this.onerror && this.onerror(error)
-    }, error => {
-      this.onerror && this.onerror(error)
-    })
-
+    // this.close(error).then(() => {
+    //   this.onerror && this.onerror(error)
+    // }, error => {
+    //   this.onerror && this.onerror(error)
+    // })
+    this.onerror && this.onerror(error)
     // don't close the connect
     // this.onerror && this.onerror(error)
   }
