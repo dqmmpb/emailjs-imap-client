@@ -141,8 +141,8 @@ export default class Imap {
 
         // Connection closing unexpected is an error
         this.socket.onclose = (e) => {
-          console.log('close ', e)
-          this._onError(new Error('Socket closed unexpectedly!' + this.host))
+          this.logger.error(e)
+          this._onError(new Error('Socket closed unexpectedly! ' + this.host))
         }
 
         this.socket.ondata = (evt) => {
@@ -403,12 +403,12 @@ export default class Imap {
     this.logger.error(error)
 
     // always call onerror callback, no matter if close() succeeds or fails
-    // this.close(error).then(() => {
-    //   this.onerror && this.onerror(error)
-    // }, error => {
-    //   this.onerror && this.onerror(error)
-    // })
-    this.onerror && this.onerror(error)
+    this.close(error).then(() => {
+      this.onerror && this.onerror(error)
+    }, error => {
+      this.onerror && this.onerror(error)
+    })
+
     // don't close the connect
     // this.onerror && this.onerror(error)
   }
